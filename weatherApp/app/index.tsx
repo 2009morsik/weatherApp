@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, Image, ScrollView, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, Button, Image, Modal, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import axios from 'axios';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
+// API ключ для получения данных о погоде
 const API_KEY = '4bab1135e84f88608fc00b3799e2a2e9';
 
-// Добавляем города
+// Список доступных городов для выбора
 const cities = ['Москва', 'Нью-Йорк', 'Лондон', 'Париж', 'Токио', 'Екатеринбург', 'Ханты-Мансийск'];
 
+// Функция для получения данных о погоде для выбранного города
 const getWeatherData = async (city: string) => {
     try {
         const response = await axios.get(
@@ -17,30 +19,76 @@ const getWeatherData = async (city: string) => {
         return response.data;
     } catch (error) {
         console.error('Error fetching weather data:', error);
-        return null;
+        return null;  // Возвращаем null в случае ошибки
     }
 };
 
 const WeatherApp = () => {
+    // Состояние для хранения выбранного города
     const [city, setCity] = useState('Москва'); // Начальный город — Москва
+    // Состояние для хранения данных о погоде
     const [weather, setWeather] = useState<any>(null);
-    const [isModalVisible, setIsModalVisible] = useState(false);  // Управление видимостью модального окна
-    const router = useRouter();
+    // Состояние для управления видимостью модального окна
+    const [isModalVisible, setIsModalVisible] = useState(false);
+    // Состояние для управления индикатором загрузки
+    const [isLoading, setIsLoading] = useState(true);
+    const router = useRouter();  // Используем роутер для навигации
 
+    // Эффект для загрузки города из AsyncStorage при старте приложения
     useEffect(() => {
-        const fetchWeather = async () => {
-            const data = await getWeatherData(city);
-            setWeather(data);
+        const loadCityFromStorage = async () => {
+            try {
+                const storedCity = await AsyncStorage.getItem('selectedCity');
+                if (storedCity) {
+                    setCity(storedCity); // Если город сохранен в AsyncStorage, устанавливаем его
+                }
+            } catch (error) {
+                console.error('Error loading city from AsyncStorage:', error);
+            }
         };
 
-        fetchWeather();
-    }, [city]);
+        loadCityFromStorage();
+    }, []);  // Эффект выполняется только один раз при загрузке компонента
 
-    if (!weather) {
-        return <Text>Загрузка...</Text>;
+    // Эффект для получения данных о погоде при изменении города
+    useEffect(() => {
+        const fetchWeather = async () => {
+            setIsLoading(true);  // Включаем индикатор загрузки
+            const data = await getWeatherData(city);  // Получаем данные о погоде для выбранного города
+            setWeather(data);  // Сохраняем данные о погоде в состояние
+            setIsLoading(false);  // Выключаем индикатор загрузки
+        };
+
+        if (city) {
+            fetchWeather();  // Если город выбран, запрашиваем погоду
+        }
+    }, [city]);  // Эффект срабатывает при изменении города
+
+    // Если данные о погоде загружаются, показываем индикатор загрузки
+    if (isLoading) {
+        return (
+            <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#4A90E2" />
+            </View>
+        );
     }
 
-    // Словарь для русских состояний погоды и соответствующих иконок
+    // Если погода не была получена, показываем сообщение об ошибке
+    if (!weather) {
+        return (
+            <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Не удалось загрузить погоду.</Text>
+            </View>
+        );
+    }
+
+    // Округляем температуру до целого числа
+    const temperature = Math.round(weather.main.temp);
+    const pressure = (weather.main.pressure * 0.750063).toFixed(0); // Давление в hPa
+    const humidity = weather.main.humidity; // Влажность в %
+    const windSpeed = weather.wind.speed; // Скорость ветра в м/с
+
+    // Функция для получения соответствующей иконки для состояния погоды
     const getWeatherImage = (weatherCondition: string) => {
         const weatherImages: { [key: string]: string } = {
             'ясно': 'https://openweathermap.org/img/wn/01d.png',
@@ -54,38 +102,44 @@ const WeatherApp = () => {
             'гроза': 'https://openweathermap.org/img/wn/11d.png',
             'снег': 'https://openweathermap.org/img/wn/13d.png',
             'туман': 'https://openweathermap.org/img/wn/50d.png',
+            'небольшой снег': 'https://openweathermap.org/img/wn/13d.png',
         };
 
-        return weatherImages[weatherCondition.toLowerCase()] || weatherImages['ясно']; // По умолчанию ясное небо
+        return weatherImages[weatherCondition.toLowerCase()] || weatherImages['ясно'];
     };
 
     const handleCitySelect = (selectedCity: string) => {
         setCity(selectedCity);
-        setIsModalVisible(false); // Закрыть модальное окно после выбора города
+        setIsModalVisible(false);
     };
-
-    const temperature = Math.round(weather.main.temp);
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
             <Text style={styles.title}>Текущая погода в {weather.name}</Text>
-            <Text style={styles.temperature}>{temperature}°C</Text>
-            <Image
-                source={{ uri: getWeatherImage(weather.weather[0].description) }}
-                style={styles.weatherIcon}
-            />
-            <Text style={styles.description}>{weather.weather[0].description}</Text>
-            <TouchableOpacity onPress={() => router.push('/forecast')}  style={styles.button}>
-                <Text style={styles.buttonText}>
-                    Перейти к прогнозу на несколько дней
-                </Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIsModalVisible(true)}  style={styles.button}>
-                <Text style={styles.buttonText}>
-                    Выберите город
-                </Text>
+
+            <View style={styles.weatherInfoContainer}>
+                <Text style={styles.temperature}>{temperature}°C</Text>
+                <Image
+                    source={{ uri: getWeatherImage(weather.weather[0].description) }}
+                    style={styles.weatherIcon}
+                />
+                <Text style={styles.description}>{weather.weather[0].description}</Text>
+            </View>
+
+            {/* Добавляем информацию о давлении, влажности и скорости ветра */}
+            <View style={styles.weatherDetailsContainer}>
+                <Text style={styles.weatherDetails}>Давление: {pressure} мм рт. ст.</Text>
+                <Text style={styles.weatherDetails}>Влажность: {humidity}%</Text>
+                <Text style={styles.weatherDetails}>Скорость ветра: {windSpeed} м/с</Text>
+            </View>
+
+            <TouchableOpacity onPress={() => router.push('/forecast')} style={styles.button}>
+                <Text style={styles.buttonText}>Прогноз на несколько дней</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity onPress={() => setIsModalVisible(true)} style={styles.button}>
+                <Text style={styles.buttonText}>Выберите город</Text>
+            </TouchableOpacity>
 
             <Modal visible={isModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalOverlay}>
@@ -110,23 +164,60 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         padding: 16,
+        backgroundColor: '#f4f4f4',
     },
     title: {
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 20,
+    },
+    weatherInfoContainer: {
+        alignItems: 'center',
+        marginBottom: 60,
     },
     temperature: {
         fontSize: 48,
         fontWeight: 'bold',
+        color: '#4A90E2',
+        marginBottom: 10,
     },
     weatherIcon: {
         width: 100,
         height: 100,
     },
     description: {
+        fontSize: 20,
+        color: '#777',
+    },
+    weatherDetailsContainer: {
+        marginTop: 20,
+        alignItems: 'center',
+    },
+    weatherDetails: {
         fontSize: 18,
-        color: 'gray',
-        marginBottom: 60,
+        color: '#555',
+        marginVertical: 5,
+    },
+    button: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#4A90E2',
+        height: 50,
+        borderRadius: 25,
+        width: '90%',
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+        elevation: 5,
+        paddingHorizontal: 20,
+    },
+    buttonText: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
     },
     modalOverlay: {
         flex: 1,
@@ -156,18 +247,22 @@ const styles = StyleSheet.create({
         fontSize: 16,
         textAlign: 'center',
     },
-    button:{
+    loadingContainer: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#4A90E2',
-        height: 45,
-        borderRadius: 20,
-        width: "90%",
-        marginBottom: 20
+        backgroundColor: '#f4f4f4',
     },
-    buttonText:{
-        color:'black',
+    errorContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f4f4f4',
+    },
+    errorText: {
         fontSize: 18,
+        color: '#d9534f',
+        fontWeight: 'bold',
     },
 });
 
